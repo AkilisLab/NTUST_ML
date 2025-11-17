@@ -6,6 +6,9 @@ import numpy as np
 from models.mlp import MLP
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
+import json
+from collections import defaultdict
 
 
 def parse_args():
@@ -25,7 +28,43 @@ def parse_args():
     p.add_argument("--max-samples", type=int, default=None, help="limit dataset samples for quick tests")
     p.add_argument("--use-weighted-sampler", action='store_true', help="use a WeightedRandomSampler to balance classes during training")
     p.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="directory to save model checkpoints")
+    p.add_argument("--record-gradients", action='store_true', help="record gradient norms and flow for analysis")
     return p.parse_args()
+
+
+def compute_gradient_norm(model):
+    """Compute L2 norm of gradients across all parameters"""
+    total_norm = 0.0
+    param_count = 0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+            param_count += 1
+    return (total_norm ** 0.5) if param_count > 0 else 0.0
+
+
+def compute_parameter_update_norm(model, prev_params):
+    """Compute L2 norm of parameter updates"""
+    total_norm = 0.0
+    param_count = 0
+    for (name, p), prev_p in zip(model.named_parameters(), prev_params):
+        if p.requires_grad:
+            update_norm = (p.data - prev_p).norm(2)
+            total_norm += update_norm.item() ** 2
+            param_count += 1
+    return (total_norm ** 0.5) if param_count > 0 else 0.0
+
+
+def record_layer_gradients(model):
+    """Record gradient norms for each layer"""
+    layer_grads = {}
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            layer_grads[name] = p.grad.data.norm(2).item()
+        else:
+            layer_grads[name] = 0.0
+    return layer_grads
 
 
 def get_data_loaders(args):
@@ -63,13 +102,23 @@ def get_data_loaders(args):
     return train_loader, val_loader, test_loader, input_dim, num_classes
 
 
-def train_epoch(model, loader, opt, criterion, device):
+def train_epoch(model, loader, opt, criterion, device, record_gradients=False):
     model.train()
     total_loss = 0.0
     correct = 0
     total = 0
-    for xb, yb in loader:
+    
+    # Gradient recording
+    gradient_norms = []
+    layer_gradients = defaultdict(list)
+    parameter_updates = []
+    
+    for batch_idx, (xb, yb) in enumerate(loader):
         xb = xb.to(device)
+        # Store previous parameters for update norm calculation
+        if record_gradients:
+            prev_params = [p.data.clone() for p in model.parameters() if p.requires_grad]
+        
         # handle binary (BCEWithLogitsLoss) vs multiclass (CrossEntropyLoss)
         if isinstance(criterion, nn.BCEWithLogitsLoss):
             yb = yb.float().to(device)
@@ -83,12 +132,46 @@ def train_epoch(model, loader, opt, criterion, device):
             loss = criterion(logits, yb)
             preds = logits.argmax(dim=1)
             correct += (preds == yb).sum().item()
+        
         opt.zero_grad()
         loss.backward()
+        
+        # Record gradients before optimizer step
+        if record_gradients:
+            grad_norm = compute_gradient_norm(model)
+            gradient_norms.append(grad_norm)
+            
+            # Record layer-wise gradients every 10 batches to avoid overhead
+            if batch_idx % 10 == 0:
+                layer_grads = record_layer_gradients(model)
+                for layer_name, grad_norm in layer_grads.items():
+                    layer_gradients[layer_name].append(grad_norm)
+        
         opt.step()
+        
+        # Record parameter updates
+        if record_gradients:
+            update_norm = compute_parameter_update_norm(model, prev_params)
+            parameter_updates.append(update_norm)
+        
         total_loss += loss.item() * xb.size(0)
         total += xb.size(0)
-    return total_loss / total, correct / total
+    
+    epoch_stats = {
+        'loss': total_loss / total,
+        'accuracy': correct / total
+    }
+    
+    if record_gradients:
+        epoch_stats.update({
+            'avg_gradient_norm': np.mean(gradient_norms) if gradient_norms else 0.0,
+            'max_gradient_norm': np.max(gradient_norms) if gradient_norms else 0.0,
+            'min_gradient_norm': np.min(gradient_norms) if gradient_norms else 0.0,
+            'avg_parameter_update_norm': np.mean(parameter_updates) if parameter_updates else 0.0,
+            'layer_gradients': dict(layer_gradients)
+        })
+    
+    return epoch_stats
 
 
 def eval_epoch(model, loader, criterion, device):
@@ -214,11 +297,26 @@ def main():
     os.makedirs(ckpt_dir, exist_ok=True)
 
     best_val_acc = -1.0
+    
+    # Initialize gradient tracking
+    gradient_history = defaultdict(list) if args.record_gradients else None
 
     for epoch in range(1, args.epochs + 1):
-        train_loss, train_acc = train_epoch(model, train_loader, opt, criterion, device)
+        train_stats = train_epoch(model, train_loader, opt, criterion, device, args.record_gradients)
         val_loss, val_acc = eval_epoch(model, val_loader if val_loader is not None else test_loader, criterion, device)
+        
+        train_loss = train_stats['loss']
+        train_acc = train_stats['accuracy']
+        
         print(f"Epoch {epoch}/{args.epochs}: train_loss={train_loss:.4f} train_acc={train_acc:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
+        
+        # Record gradient statistics
+        if args.record_gradients:
+            gradient_history['avg_gradient_norm'].append(train_stats['avg_gradient_norm'])
+            gradient_history['max_gradient_norm'].append(train_stats['max_gradient_norm'])
+            gradient_history['avg_parameter_update_norm'].append(train_stats['avg_parameter_update_norm'])
+            print(f"  Gradient norm: avg={train_stats['avg_gradient_norm']:.6f}, max={train_stats['max_gradient_norm']:.6f}")
+            print(f"  Parameter update norm: {train_stats['avg_parameter_update_norm']:.6f}")
 
         # record metrics
         if 'metrics' not in locals():
@@ -280,6 +378,48 @@ def main():
         fig.savefig(plot_path)
         plt.close(fig)
         print(f"Saved training metrics to {metrics_csv} and plot to {plot_path}")
+        
+        # Generate gradient plots if recording was enabled
+        if args.record_gradients and gradient_history:
+            try:
+                # Gradient norm plot
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+                
+                epochs = range(1, len(gradient_history['avg_gradient_norm']) + 1)
+                ax1.plot(epochs, gradient_history['avg_gradient_norm'], 'b-', label='Average Gradient Norm')
+                ax1.plot(epochs, gradient_history['max_gradient_norm'], 'r--', label='Max Gradient Norm')
+                ax1.set_xlabel('Epoch')
+                ax1.set_ylabel('Gradient Norm')
+                ax1.set_title('Gradient Norms During Training')
+                ax1.legend()
+                ax1.grid(True)
+                ax1.set_yscale('log')
+                
+                # Parameter update norm plot
+                ax2.plot(epochs, gradient_history['avg_parameter_update_norm'], 'g-', label='Parameter Update Norm')
+                ax2.set_xlabel('Epoch')
+                ax2.set_ylabel('Update Norm')
+                ax2.set_title('Parameter Update Magnitudes')
+                ax2.legend()
+                ax2.grid(True)
+                ax2.set_yscale('log')
+                
+                plt.tight_layout()
+                gradient_plot_path = os.path.join(ckpt_dir, 'gradient_analysis.png')
+                fig.savefig(gradient_plot_path)
+                plt.close(fig)
+                
+                # Save gradient history as JSON
+                gradient_json_path = os.path.join(ckpt_dir, 'gradient_history.json')
+                # Convert numpy arrays to lists for JSON serialization
+                gradient_data = {k: [float(x) for x in v] for k, v in gradient_history.items()}
+                with open(gradient_json_path, 'w') as f:
+                    json.dump(gradient_data, f, indent=2)
+                
+                print(f"Saved gradient analysis to {gradient_plot_path} and {gradient_json_path}")
+            except Exception as e:
+                print(f"Failed to save gradient plots: {e}")
+                
     except Exception as e:
         print(f"Failed to save/plot metrics: {e}")
 

@@ -16,6 +16,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import defaultdict
 
 from models.cnn import CNN, create_cnn_for_dataset
 
@@ -80,6 +81,8 @@ def parse_args():
                        help='Save checkpoint every N epochs')
     parser.add_argument('--plot', action='store_true',
                        help='Generate training plots')
+    parser.add_argument('--record-gradients', action='store_true',
+                       help='Record gradient norms and flow for analysis')
     
     # Preprocessing options (for Adult dataset)
     parser.add_argument('--one-hot-only', action='store_true',
@@ -103,6 +106,41 @@ def get_device(device_arg: str) -> torch.device:
             return torch.device('cpu')
     else:
         return torch.device(device_arg)
+
+
+def compute_gradient_norm(model):
+    """Compute L2 norm of gradients across all parameters"""
+    total_norm = 0.0
+    param_count = 0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+            param_count += 1
+    return (total_norm ** 0.5) if param_count > 0 else 0.0
+
+
+def compute_parameter_update_norm(model, prev_params):
+    """Compute L2 norm of parameter updates"""
+    total_norm = 0.0
+    param_count = 0
+    for (name, p), prev_p in zip(model.named_parameters(), prev_params):
+        if p.requires_grad:
+            update_norm = (p.data - prev_p).norm(2)
+            total_norm += update_norm.item() ** 2
+            param_count += 1
+    return (total_norm ** 0.5) if param_count > 0 else 0.0
+
+
+def record_layer_gradients(model):
+    """Record gradient norms for each layer"""
+    layer_grads = {}
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            layer_grads[name] = p.grad.data.norm(2).item()
+        else:
+            layer_grads[name] = 0.0
+    return layer_grads
 
 
 def load_dataset(args):
@@ -208,15 +246,24 @@ def setup_training(model, args, train_loader, device):
     return optimizer, criterion, scheduler
 
 
-def train_epoch(model, train_loader, optimizer, criterion, device):
+def train_epoch(model, train_loader, optimizer, criterion, device, record_gradients=False):
     """Train for one epoch"""
     model.train()
     running_loss = 0.0
     correct = 0
     total = 0
     
+    # Gradient recording
+    gradient_norms = []
+    layer_gradients = defaultdict(list)
+    parameter_updates = []
+    
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
+        
+        # Store previous parameters for update norm calculation
+        if record_gradients:
+            prev_params = [p.data.clone() for p in model.parameters() if p.requires_grad]
         
         optimizer.zero_grad()
         output = model(data)
@@ -232,14 +279,46 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
             correct += (pred == target).sum().item()
         
         loss.backward()
+        
+        # Record gradients before optimizer step
+        if record_gradients:
+            grad_norm = compute_gradient_norm(model)
+            gradient_norms.append(grad_norm)
+            
+            # Record layer-wise gradients every 10 batches to avoid overhead
+            if batch_idx % 10 == 0:
+                layer_grads = record_layer_gradients(model)
+                for layer_name, grad_norm in layer_grads.items():
+                    layer_gradients[layer_name].append(grad_norm)
+        
         optimizer.step()
+        
+        # Record parameter updates
+        if record_gradients:
+            update_norm = compute_parameter_update_norm(model, prev_params)
+            parameter_updates.append(update_norm)
         
         running_loss += loss.item()
         total += target.size(0)
     
     epoch_loss = running_loss / len(train_loader)
     epoch_acc = correct / total
-    return epoch_loss, epoch_acc
+    
+    epoch_stats = {
+        'loss': epoch_loss,
+        'accuracy': epoch_acc
+    }
+    
+    if record_gradients:
+        epoch_stats.update({
+            'avg_gradient_norm': np.mean(gradient_norms) if gradient_norms else 0.0,
+            'max_gradient_norm': np.max(gradient_norms) if gradient_norms else 0.0,
+            'min_gradient_norm': np.min(gradient_norms) if gradient_norms else 0.0,
+            'avg_parameter_update_norm': np.mean(parameter_updates) if parameter_updates else 0.0,
+            'layer_gradients': dict(layer_gradients)
+        })
+    
+    return epoch_stats
 
 
 def validate(model, val_loader, criterion, device):
@@ -362,13 +441,22 @@ def main():
     train_accs, val_accs = [], []
     best_val_acc = 0.0
     
+    # Initialize gradient tracking
+    gradient_history = defaultdict(list) if args.record_gradients else None
+    
     start_time = time.time()
     
     for epoch in range(1, args.epochs + 1):
         epoch_start = time.time()
         
         # Train
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
+        train_stats = train_epoch(model, train_loader, optimizer, criterion, device, args.record_gradients)
+        if isinstance(train_stats, dict):
+            train_loss = train_stats['loss']
+            train_acc = train_stats['accuracy']
+        else:
+            # Fallback for older return format
+            train_loss, train_acc = train_stats
         
         # Validate
         val_loss, val_acc = validate(model, val_loader, criterion, device)
@@ -383,11 +471,22 @@ def main():
         train_accs.append(train_acc)
         val_accs.append(val_acc)
         
+        # Record gradient statistics
+        if args.record_gradients and isinstance(train_stats, dict):
+            gradient_history['avg_gradient_norm'].append(train_stats.get('avg_gradient_norm', 0.0))
+            gradient_history['max_gradient_norm'].append(train_stats.get('max_gradient_norm', 0.0))
+            gradient_history['avg_parameter_update_norm'].append(train_stats.get('avg_parameter_update_norm', 0.0))
+        
         # Print progress
         epoch_time = time.time() - epoch_start
         print(f"Epoch {epoch:3d}/{args.epochs} ({epoch_time:.1f}s) - "
               f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        
+        # Print gradient statistics
+        if args.record_gradients and isinstance(train_stats, dict):
+            print(f"  Gradient norm: avg={train_stats.get('avg_gradient_norm', 0.0):.6f}, max={train_stats.get('max_gradient_norm', 0.0):.6f}")
+            print(f"  Parameter update norm: {train_stats.get('avg_parameter_update_norm', 0.0):.6f}")
         
         # Save best model
         if val_acc > best_val_acc:
@@ -424,7 +523,48 @@ def main():
     if args.plot:
         plot_path = os.path.join(args.checkpoint_dir, 'cnn_training_curves.png')
         plot_training_history(train_losses, val_losses, train_accs, val_accs, plot_path)
-        print(f"Training curves saved to {plot_path}")
+        print(f"Training plots saved to {plot_path}")
+    
+    # Generate gradient plots if recording was enabled
+    if args.record_gradients and gradient_history:
+        try:
+            # Gradient norm plot
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+            
+            epochs = range(1, len(gradient_history['avg_gradient_norm']) + 1)
+            ax1.plot(epochs, gradient_history['avg_gradient_norm'], 'b-', label='Average Gradient Norm')
+            ax1.plot(epochs, gradient_history['max_gradient_norm'], 'r--', label='Max Gradient Norm')
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Gradient Norm')
+            ax1.set_title('CNN Gradient Norms During Training')
+            ax1.legend()
+            ax1.grid(True)
+            ax1.set_yscale('log')
+            
+            # Parameter update norm plot
+            ax2.plot(epochs, gradient_history['avg_parameter_update_norm'], 'g-', label='Parameter Update Norm')
+            ax2.set_xlabel('Epoch')
+            ax2.set_ylabel('Update Norm')
+            ax2.set_title('CNN Parameter Update Magnitudes')
+            ax2.legend()
+            ax2.grid(True)
+            ax2.set_yscale('log')
+            
+            plt.tight_layout()
+            gradient_plot_path = os.path.join(args.checkpoint_dir, 'cnn_gradient_analysis.png')
+            fig.savefig(gradient_plot_path)
+            plt.close(fig)
+            
+            # Save gradient history as JSON
+            gradient_json_path = os.path.join(args.checkpoint_dir, 'cnn_gradient_history.json')
+            # Convert numpy arrays to lists for JSON serialization
+            gradient_data = {k: [float(x) for x in v] for k, v in gradient_history.items()}
+            with open(gradient_json_path, 'w') as f:
+                json.dump(gradient_data, f, indent=2)
+            
+            print(f"CNN gradient analysis saved to {gradient_plot_path} and {gradient_json_path}")
+        except Exception as e:
+            print(f"Failed to save gradient plots: {e}")
     
     print(f"Checkpoints saved to {args.checkpoint_dir}/")
 

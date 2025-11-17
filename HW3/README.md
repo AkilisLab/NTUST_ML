@@ -30,7 +30,8 @@ python3 train.py \
 	--loss cross_entropy \
 	--val-size 0.1 \
 	--use-weighted-sampler \
-	--checkpoint-dir checkpoints/mlp_adult_shallow_sampler
+	--checkpoint-dir checkpoints/mlp_adult_shallow_sampler \
+  --record-gradients
 ```
 
 3) Deep training — Adult (5 hidden layers):
@@ -47,7 +48,8 @@ python3 train.py \
 	--loss cross_entropy \
 	--val-size 0.1 \
 	--use-weighted-sampler \
-	--checkpoint-dir checkpoints/mlp_adult_deep
+	--checkpoint-dir checkpoints/mlp_adult_deep \
+	--record-gradients
 ```
 
 4) Shallow training — MNIST (2 hidden layers, ReLU):
@@ -63,7 +65,8 @@ python3 train.py \
 	--activation relu \
 	--loss cross_entropy \
 	--val-size 0.1 \
-	--checkpoint-dir checkpoints/mlp_mnist_shallow_relu
+	--checkpoint-dir checkpoints/mlp_mnist_shallow_relu \
+  --record-gradients
 ```
 
 4b) Shallow training — MNIST (2 hidden layers, Sigmoid):
@@ -79,7 +82,8 @@ python3 train.py \
 	--activation sigmoid \
 	--loss cross_entropy \
 	--val-size 0.1 \
-	--checkpoint-dir checkpoints/mlp_mnist_shallow_sigmoid
+	--checkpoint-dir checkpoints/mlp_mnist_shallow_sigmoid \
+  --record-gradients
 ```
 
 5) Deep training — MNIST (5 hidden layers, ReLU):
@@ -95,7 +99,8 @@ python3 train.py \
 	--activation relu \
 	--loss cross_entropy \
 	--val-size 0.1 \
-	--checkpoint-dir checkpoints/mlp_mnist_deep_relu
+	--checkpoint-dir checkpoints/mlp_mnist_deep_relu \
+	--record-gradients
 ```
 
 5b) Deep training — MNIST (5 hidden layers, Sigmoid):
@@ -111,7 +116,8 @@ python3 train.py \
 	--activation sigmoid \
 	--loss cross_entropy \
 	--val-size 0.1 \
-	--checkpoint-dir checkpoints/mlp_mnist_deep_sigmoid
+	--checkpoint-dir checkpoints/mlp_mnist_deep_sigmoid \
+	--record-gradients
 ```
 
 6) Testing — Adult models (evaluate specific checkpoints):
@@ -294,7 +300,8 @@ python3 train_cnn.py \
   --lr 0.001 \
   --dropout 0.3 \
   --checkpoint-dir checkpoints/cnn_mnist_shallow \
-  --plot
+  --plot \
+  --record-gradients
 ```
 
 ```bash
@@ -311,7 +318,8 @@ python3 train_cnn.py \
   --optimizer adamw \
   --scheduler cosine \
   --checkpoint-dir checkpoints/cnn_mnist_deep \
-  --plot
+  --plot \
+  --record-gradients
 ```
 
 2) testing
@@ -351,7 +359,8 @@ python3 train_cnn.py \
   --class-weight \
   --one-hot-only \
   --checkpoint-dir checkpoints/cnn_adult_shallow \
-  --plot
+  --plot \
+  --record-gradients
 ```
 
 ```bash
@@ -372,7 +381,8 @@ python3 train_cnn.py \
   --optimizer adamw \
   --scheduler step \
   --checkpoint-dir checkpoints/cnn_adult_deep \
-  --plot
+  --plot \
+  --record-gradients
 ```
 
 2) Testing
