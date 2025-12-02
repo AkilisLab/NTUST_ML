@@ -6,6 +6,7 @@ Usage:
   python run_all.py 25           # use cut_len=25 for prefixes
 """
 import sys
+import pandas as pd
 
 from data_understanding import load_and_preprocess_data
 from data_visualization import (
@@ -15,26 +16,30 @@ from data_visualization import (
     plot_start_locations,
     plot_trajectories_sample,
     plot_destinations_map,
+    plot_correlation_heatmap
 )
-from data_preparation import build_training_table, save_training_tables
+from data_preparation import main as prepare_data
 
 
 def main(cut_len: int = 10) -> None:
-    print("[1/3] Loading data...")
+    print("[1/2] Generating visualizations...")
     train, test, sample, location = load_and_preprocess_data()
-
-    print("[2/3] Generating visualizations...")
     plot_trip_counts(train.copy())
     plot_call_type_distribution(train.copy())
     plot_trajectory_lengths(train.copy())
     plot_start_locations(train.copy())
     plot_trajectories_sample(train.copy())
     plot_destinations_map(train.copy())
+    # X is not available in new workflow, skip correlation heatmap
 
-    print("[3/3] Preparing training tables...")
-    X, y = build_training_table(train.copy(), cut_len=cut_len)
-    save_training_tables(X, y)
-    print(f"Saved: prep_X.csv (shape {X.shape}), prep_y.csv (shape {y.shape})")
+    print("[2/2] Preparing processed data files...")
+    prepare_data()
+    print("Saved: train_processed.csv and test_processed.csv")
+
+    # Correlation study for processed training data
+    print("[Post] Correlation study for processed training data...")
+    processed_train = pd.read_csv("train_processed.csv")
+    plot_correlation_heatmap(processed_train)
 
 
 if __name__ == "__main__":

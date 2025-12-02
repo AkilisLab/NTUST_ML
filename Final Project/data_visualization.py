@@ -145,6 +145,19 @@ def plot_destinations_map(train, sample_size=50000):
     print("Saved destinations_map.png")
     plt.close()
 
+def plot_correlation_heatmap(df, filename="correlation_heatmap.png"):
+    """Plots a correlation heatmap for numeric features in the DataFrame."""
+    # Select only numeric columns
+    numeric_df = df.select_dtypes(include=[np.number])
+    corr = numeric_df.corr()
+    plt.figure(figsize=(14, 12))
+    sns.heatmap(corr, annot=True, fmt=".2f", vmin=-1, vmax=1, center=0, cmap="coolwarm", square=True)
+    plt.title("Feature Correlation Heatmap")
+    plt.tight_layout()
+    plt.savefig(filename)
+    print(f"Saved {filename}")
+    plt.close()
+
 if __name__ == "__main__":
     print("Loading data...")
     train, test, sample, location = load_and_preprocess_data()
