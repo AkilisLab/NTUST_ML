@@ -1,40 +1,5 @@
-# IMPORTING PACKAGES
-
-# FOR FILE
-import zipfile
-
-# DATA PREPROCESSING
-import pandas as pd
-import datetime 
-import numpy as np
-import re
-
-# VISUALIZATION
-import folium
-import seaborn as sns
-import plotly.express as px
-import plotly.graph_objects as go
-import plotly.figure_factory as ff
-from matplotlib import pyplot as plt
-from plotly.subplots import make_subplots
-import warnings
-warnings.filterwarnings('ignore')
-
-# MACHINE LEARNING PACKAGES
-from sklearn import preprocessing
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn import linear_model
-from sklearn.linear_model import Ridge
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.metrics import make_scorer
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics import r2_score
+# Centralized imports
+from project_imports import *
 
 def load_and_preprocess_data():
     ## LOADING DATA

@@ -5,8 +5,9 @@ Usage:
   python run_all.py              # default cut_len=10
   python run_all.py 25           # use cut_len=25 for prefixes
 """
+
+from project_imports import *
 import sys
-import pandas as pd
 
 from data_understanding import load_and_preprocess_data
 from data_visualization import (

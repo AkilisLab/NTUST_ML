@@ -1,7 +1,4 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+from project_imports import *
 import json
 import ast
 from data_understanding import load_and_preprocess_data

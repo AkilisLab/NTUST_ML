@@ -1,10 +1,5 @@
-
 # Revised logic based on Kaggle solution order
-import numpy as np
-import pandas as pd
-import datetime
-import re
-from sklearn.preprocessing import OneHotEncoder
+from project_imports import *
 from data_understanding import load_and_preprocess_data
 
 def investigate_features(df, name):
