@@ -1,114 +1,76 @@
-from project_imports import *
+"""Run baseline models and generate comparison metrics."""
+
+import re
+from typing import Any, Callable, Dict, List, Tuple
+
+import pandas as pd
+
 from prepare_ml_data import prepare_ml_data
+from models.baselines import (
+    build_decision_tree,
+    build_gradient_boosting,
+    build_knn,
+    build_linear_regression,
+    build_random_forest,
+    build_ridge,
+)
+from models.evaluation import evaluate_model, predict_for_submission
+from submission_writer import save_submission
 
-train_path = "train_processed.csv"
-test_path = "test_processed.csv"
-X_train, X_test, y_train, y_test, X_Test = prepare_ml_data(train_path, test_path)
+TRAIN_PATH = "train_processed.csv"
+TEST_PATH = "test_processed.csv"
 
-# LINEAR REGRESSION MODEL
+# Model registry: name -> factory callable
+TRAINERS: List[Tuple[str, Callable]] = [
+    ("Linear Regression", build_linear_regression),
+    ("Random Forest", build_random_forest),
+    ("Gradient Boosting", build_gradient_boosting),
+    ("K-Nearest Neighbors", build_knn),
+    ("Ridge Regression", build_ridge),
+    ("Decision Tree", build_decision_tree),
+]
 
-lr = MultiOutputRegressor(LinearRegression(n_jobs=1))
 
-# Fitting
-lr = lr.fit(X_train, y_train)
-y_train_pred = lr.predict(X_train)
-y_test_pred = lr.predict(X_test)
+def print_metrics(name: str, metrics: Dict[str, float]) -> None:
+    """Pretty-print evaluation metrics for a model."""
+    print(f"{name}")
+    print(f"  MSE train: {metrics['mse_train']:.6f}")
+    print(f"  MSE val:   {metrics['mse_val']:.6f}")
+    print(f"  R2 train:  {metrics['r2_train']:.6f}")
+    print(f"  R2 val:    {metrics['r2_val']:.6f}")
 
-# RANDOMFOREST REGRESSOR MODEL
 
-forest = MultiOutputRegressor(RandomForestRegressor(n_estimators=100, random_state=1))
+def main(train_path: str = TRAIN_PATH, test_path: str = TEST_PATH) -> None:
+    """Train all baseline models, report metrics, and write a submission file."""
+    X_train, X_val, y_train, y_val, X_test = prepare_ml_data(train_path, test_path)
+    test_df = pd.read_csv(test_path)
 
-# Fitting
-forest = forest.fit(X_train, y_train)
-y_train_pred2 = forest.predict(X_train)
-y_test_pred2 = forest.predict(X_test)
+    metrics_summary: List[Dict[str, Any]] = []
 
-# GRADIENTBOOSTING REGRESSOR MODEL
+    for name, factory in TRAINERS:
+        model = factory()
+        model.fit(X_train, y_train)
+        metrics, _, _ = evaluate_model(model, X_train, X_val, y_train, y_val)
+        print_metrics(name, metrics)
+        metrics_with_name = {"model": name, **metrics}
+        metrics_summary.append(metrics_with_name)
 
-bosting = MultiOutputRegressor(GradientBoostingRegressor(random_state=0))
+        predictions = predict_for_submission(model, X_test)
+        slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+        submission_path = f"submission_{slug}.csv"
+        save_submission(
+            trip_ids=test_df["TRIP_ID"],
+            predictions=predictions,
+            output_path=submission_path,
+        )
+        print(f"Saved submission: {submission_path}")
 
-# Fitting
-bosting = bosting.fit(X_train, y_train)
-y_train_pred3 = bosting.predict(X_train)
-y_test_pred3 = bosting.predict(X_test)
+    if metrics_summary:
+        metrics_df = pd.DataFrame(metrics_summary)
+        metrics_path = "baseline_metrics.csv"
+        metrics_df.to_csv(metrics_path, index=False)
+        print(f"Saved metrics summary: {metrics_path}")
 
-# KNEIGHBORS REGRESSOR MODEL
 
-knn = MultiOutputRegressor(KNeighborsRegressor())
-
-# Fitting
-knn = knn.fit(X_train, y_train)
-y_train_pred4 = knn.predict(X_train)
-y_test_pred4 = knn.predict(X_test)
-
-# RIDGE REGRESSION MODEL
-
-reg = MultiOutputRegressor(linear_model.Ridge())
-
-# Fitting
-knn = reg.fit(X_train, y_train)
-y_train_pred5 = reg.predict(X_train)
-y_test_pred5 = reg.predict(X_test)
-
-# DECISIONTREE REGRESSOR MODEL
-
-dt = MultiOutputRegressor(DecisionTreeRegressor(max_depth=50, random_state=1))
-
-# Fitting
-dt = dt.fit(X_train, y_train)
-y_train_pred6 = dt.predict(X_train)
-y_test_pred6 = dt.predict(X_test)
-
-# EVALUATION FOR LINEAR REGRESSION
-
-print("Mean Square Error on training Data:{}".format(mean_squared_error(y_train, y_train_pred)))
-print("Mean Square Error on testing Data:{}".format(mean_squared_error(y_test, y_test_pred)))
-print("R2 score train:{}".format(r2_score(y_train, y_train_pred)))
-print("R2 score test:{}".format(r2_score(y_test, y_test_pred)))
-y_Test_pred = lr.predict(X_Test)
-
-# EVALUATION FOR RANDOMFOREST REGRESSOR
-
-print("MSE train:{}".format(mean_squared_error(y_train, y_train_pred2)))
-print("MSE test;{}".format(mean_squared_error(y_test, y_test_pred2)))
-print("R2 score train:{}".format(r2_score(y_train, y_train_pred2)))
-print("R2 score test:{}".format(r2_score(y_test, y_test_pred2)))
-
-y_Test_pred2 = forest.predict(X_Test)
-y_Test_pred2[2]
-
-# EVALUATION FOR GRADIENTBOOSTING REGRESSOR
-
-print("Mean Square Error on training Data:{}".format(mean_squared_error(y_train, y_train_pred3)))
-print("Mean Square Error on testing Data:{}".format(mean_squared_error(y_test, y_test_pred3)))
-print("R2 score train:{}".format(r2_score(y_train, y_train_pred3)))
-print("R2 score test:{}".format(r2_score(y_test, y_test_pred3)))
-y_Test_pred3 = bosting.predict(X_Test)
-y_Test_pred3[3]
-
-# EVALUATION FOR KNEIGHBORS REGRESSOR
-
-print("Mean Square Error on training Data:{}".format(mean_squared_error(y_train, y_train_pred4)))
-print("Mean Square Error on testing Data:{}".format(mean_squared_error(y_test, y_test_pred4)))
-print("R2 score train:{}".format(r2_score(y_train, y_train_pred4)))
-print("R2 score test:{}".format(r2_score(y_test, y_test_pred4)))
-y_Test_pred4 = bosting.predict(X_Test)
-y_Test_pred4[4]
-
-# EVALUATION FOR RIDGE REGRESSION
-
-print("Mean Square Error on training Data:{}".format(mean_squared_error(y_train, y_train_pred5)))
-print("Mean Square Error on testing Data:{}".format(mean_squared_error(y_test, y_test_pred5)))
-print("R2 score train:{}".format(r2_score(y_train, y_train_pred5)))
-print("R2 score test:{}".format(r2_score(y_test, y_test_pred5)))
-y_Test_pred5 = reg.predict(X_Test)
-y_Test_pred5[5]
-
-# EVALUATION FOR DECISIONTREE REGRESSOR
-
-print("Mean Square Error on training Data:{}".format(mean_squared_error(y_train, y_train_pred6)))
-print("Mean Square Error on testing Data:{}".format(mean_squared_error(y_test, y_test_pred6)))
-print("R2 score train:{}".format(r2_score(y_train, y_train_pred6)))
-print("R2 score test:{}".format(r2_score(y_test, y_test_pred6)))
-y_Test_pred6 = dt.predict(X_Test)
-y_Test_pred6[5]
+if __name__ == "__main__":
+    main()
