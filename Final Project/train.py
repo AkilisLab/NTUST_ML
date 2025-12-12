@@ -50,7 +50,8 @@ def main(train_path: str = TRAIN_PATH, test_path: str = TEST_PATH) -> None:
     for name, factory in TRAINERS:
         model = factory()
         model.fit(X_train, y_train)
-        metrics, _, _ = evaluate_model(model, X_train, X_val, y_train, y_val)
+        # Evaluate and fit inside evaluation to get timing and all metrics
+        metrics, train_pred, val_pred, train_time = evaluate_model(model, X_train, X_val, y_train, y_val)
         print_metrics(name, metrics)
         metrics_with_name = {"model": name, **metrics}
         metrics_summary.append(metrics_with_name)
