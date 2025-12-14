@@ -8,11 +8,14 @@ import pandas as pd
 from prepare_ml_data import prepare_ml_data
 from models.baselines import (
     build_decision_tree,
+    build_elastic_net,
+    build_extra_trees,
     build_gradient_boosting,
     build_knn,
     build_linear_regression,
     build_random_forest,
     build_ridge,
+    build_svr,
 )
 from models.evaluation import evaluate_model, predict_for_submission
 from submission_writer import save_submission
@@ -23,11 +26,14 @@ TEST_PATH = "test_processed.csv"
 # Model registry: name -> factory callable
 TRAINERS: List[Tuple[str, Callable]] = [
     ("Linear Regression", build_linear_regression),
-    ("Random Forest", build_random_forest),
-    ("Gradient Boosting", build_gradient_boosting),
-    ("K-Nearest Neighbors", build_knn),
     ("Ridge Regression", build_ridge),
+    ("Elastic Net", build_elastic_net),
+    ("Support Vector Regression", build_svr),
+    ("K-Nearest Neighbors", build_knn),
     ("Decision Tree", build_decision_tree),
+    ("Random Forest", build_random_forest),
+    ("Extra Trees", build_extra_trees),
+    ("Gradient Boosting", build_gradient_boosting),
 ]
 
 
