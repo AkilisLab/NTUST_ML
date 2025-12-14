@@ -4,15 +4,24 @@ Predict final taxi trip destination (latitude, longitude) from partial trajector
 
 ## 1. Repository Structure
 ```
-data_understanding.py    # Data loading & basic cleaning (train/test/meta)
-data_visualization.py    # EDA visualizations (counts, maps, trajectories)
-data_preparation.py      # Build training (prep_X.csv, prep_y.csv) & test feature tables
-run_all.py               # Orchestrates loading, visualization, and training feature build
-models/xgb/train_xgboost.py  # Train XGBoost regressors for lon/lat
-models/xgb/infer_xgboost.py  # Generate submission from test set
-prep_X.csv, prep_y.csv   # Generated training features & targets
-submission_xgb_cut10.csv # Example generated submission file
-requirements.txt         # Project dependencies
+data_understanding.py      # Load raw Kaggle zip/csv data
+data_visualization.py      # EDA plots (counts, maps, trajectories)
+data_preparation.py        # Build processed tables: train_processed.csv / test_processed.csv
+prepare_ml_data.py         # Create ML matrices + prefix features + train/val split
+train.py                   # Train baseline models, write metrics + submission_*.csv
+results_visualization.py   # Plot comparisons from baseline_metrics.csv
+submission_writer.py       # Submission CSV writer (TRIP_ID, LATITUDE, LONGITUDE)
+run_all.py                 # Run EDA + preprocessing end-to-end
+models/
+  baselines/               # Baseline model factories (sklearn)
+  evaluation.py            # Metrics (MSE/R2 + Haversine, within-km)
+pkdd-15-predict-taxi-service-trajectory-i/  # Kaggle data (zips/csv)
+requirements.txt           # Project dependencies
+
+# generated outputs
+train_processed.csv, test_processed.csv
+baseline_metrics.csv
+submission_*.csv
 ```
 
 ## 2. Setup
@@ -25,7 +34,7 @@ pip install -r requirements.txt
 ```
 
 ## 3. Data Acquisition
-Place the Kaggle competition zip files in `./pkdd-15-predict-taxi-service-trajectory-i/`:
+Place the Kaggle competition files in `./pkdd-15-predict-taxi-service-trajectory-i/` (this repo already expects the zipped files):
 ```
 sampleSubmission.csv.zip
 train.csv.zip
@@ -46,49 +55,47 @@ Generates:
 - `trajectories_sample.png`
 - `destinations_map.png`
 
-## 5. Feature Preparation
-Build prefix-based training features (uses first `cut_len` points per trajectory):
+Run the end-to-end EDA + preprocessing workflow:
 ```bash
-python run_all.py 10        # produces prep_X.csv & prep_y.csv
+python run_all.py
 ```
-Or directly:
+This also produces:
+- `missing_rate_table.png`
+- `correlation_heatmap.png`
+- `train_processed.csv` / `test_processed.csv`
+
+## 5. Data Preparation (Processed Tables)
+Generate the processed training/test tables used by the ML pipeline:
 ```bash
-python data_preparation.py  # default cut_len=10 inside main()
+python data_preparation.py
 ```
 Outputs:
-- `prep_X.csv` – feature matrix (metadata, time features, prefix geometry)
-- `prep_y.csv` – destination coordinates (`dest_lon`, `dest_lat`)
+- `train_processed.csv`
+- `test_processed.csv`
 
-## 6. Model Training (XGBoost Baseline)
-Train longitude and latitude regressors:
+Notes:
+- Time features and one-hot call-type features are added.
+- Raw `POLYLINE` remains in the processed CSVs; prefix features + labels are derived later in `prepare_ml_data.py`.
+
+## 6. Model Training (Baseline Suite)
+Train a suite of scikit-learn baselines and write per-model submissions:
 ```bash
-python models/xgb/train_xgboost.py
+python train.py
 ```
-Artifacts saved to `models/xgb/`:
-- `xgb_lon.joblib`
-- `xgb_lat.joblib`
-- `metrics_xgb.json` (contains mean/p50/p90 Haversine, within 1km/2km, counts)
+This will:
+- Train/evaluate multiple models (see `models/baselines/`)
+- Write `baseline_metrics.csv` (MSE/R² + Haversine metrics + training time)
+- Write one submission per model: `submission_<model>.csv`
 
-### Evaluation Metrics (reported)
-- Mean Haversine Distance (km)
-- P50 / P90 Haversine
-- Within 1 km / Within 2 km accuracy
+The default feature builder in `prepare_ml_data.py` uses a fixed prefix length (`PREFIX_LEN = 20`).
 
 ## 7. Inference & Submission Generation
-Generate a submission file for the test set:
-```bash
-python models/xgb/infer_xgboost.py      # default cut_len=10
-```
-Outputs:
-- `submission_xgb_cut10.csv` with columns:
-  - `TRIP_ID`
-  - `LATITUDE`
-  - `LONGITUDE`
+`train.py` generates a submission CSV for each baseline model it trains.
 
-Adjust prefix length:
-```bash
-python models/xgb/infer_xgboost.py      # (edit cut_len in code or modify main())
-```
+Submission schema (written by `submission_writer.py`):
+- `TRIP_ID`
+- `LATITUDE`
+- `LONGITUDE`
 
 ## 8. Submission Format Example
 ```
@@ -101,7 +108,7 @@ T10,42.110000,-8.721111
 ## 9. Extending the Pipeline
 Potential improvements:
 - Time-aware validation (train earlier weeks → validate later weeks).
-- Multiple prefix cuts per trajectory (e.g., lengths 5, 10, 20) to expand training data.
+- Multiple prefix lengths per trajectory (e.g., 5, 10, 20) to expand training data.
 - Additional features: average speed, bearing changes, curvature, H3/geohash cells, destination clustering.
 - Uncertainty estimation (predict error radius or quantile regression).
 - Ensemble: Combine kNN, cluster-centroid classifier, boosted trees, and sequence models.
@@ -110,7 +117,7 @@ Potential improvements:
 - Prefix duration assumes 15s sampling interval between points.
 - Frequency encoding used for high-cardinality fields (`ORIGIN_CALL`, `TAXI_ID`) to control memory.
 - One-hot kept for low-cardinality fields (`CALL_TYPE`, `ORIGIN_STAND`).
-- No data leakage: destination only used in `prep_y.csv` (labels), prefix features computed from partial points.
+- No data leakage: destination is derived from the final `POLYLINE` point for training labels only; prefix features are computed from the initial points only.
 
 ## 11. Quick Command Summary
 ```bash
@@ -120,12 +127,12 @@ python -m venv .venv && source .venv/bin/activate && pip install -r requirements
 # 2. EDA
 python data_visualization.py
 
-# 3. Feature prep (cut_len=10)
-python run_all.py 10
+# 3. Build processed tables
+python data_preparation.py
 
-# 4. Train XGBoost
-python models/xgb/train_xgboost.py
+# 4. Train baselines + write metrics/submissions
+python train.py
 
-# 5. Inference / submission
-python models/xgb/infer_xgboost.py
+# 5. Optional: plot model comparisons
+python results_visualization.py
 ```
